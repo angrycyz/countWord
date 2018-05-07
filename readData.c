@@ -17,6 +17,47 @@ struct hashtable {
     UT_hash_handle hh;
 };
 
+struct linked_list {
+    struct list_node *head;
+    struct list_node *tail;
+};
+
+struct list_node {
+    char name[WORD_MAX_LEN];
+    struct list_node *next;
+};
+
+void writeToLinkedList(char* word, struct linked_list* list);
+void list_append(struct linked_list *list, struct list_node *node);
+int list_empty(struct linked_list *list);
+
+int list_empty(struct linked_list *list) {
+    return list->head == NULL;
+}
+
+struct list_node* list_pop(struct linked_list *list) {
+    if (list->head == NULL) {
+        return NULL;
+    } else {
+        struct list_node *node = list->head;
+        list->head = node->next;
+        if (list->head == NULL){
+            list->tail = NULL;
+        }
+        return node;
+    }
+}
+
+void list_append(struct linked_list *list, struct list_node *node) {
+    node->next = NULL;
+    if (list->head == NULL) {
+        list->head = list->tail = node;
+    } else {
+        list->tail->next = node;
+        list->tail = node;
+    }
+}
+
 // assume that input is valid
 // assume no specific order is required for the result
 void readData(char* path) {
@@ -47,12 +88,14 @@ void readData(char* path) {
     }
     
     struct hashtable *s, *tmp, *table = NULL;
+    struct linked_list list;
     
     int line_num = 1;
     int word_count = 1;
     char character;
     char word[WORD_MAX_LEN];
     int index = 0;
+    
     while ((character = fgetc(input)) != EOF) {
         
         if (character == '\n' || character == ' ' || character == '\0' || character == '\t') {
@@ -70,6 +113,8 @@ void readData(char* path) {
                 i++;
             }
 
+            writeToLinkedList(word, &list);
+            
             /* HASH_FIND_STR find the char array, if not found, it will free the s */
 #ifdef lock_uthash
             if (pthread_rwlock_rdlock(&lock) != 0) {
@@ -118,6 +163,16 @@ void readData(char* path) {
 #endif
 }
 
+void writeToLinkedList(char word[], struct linked_list* list){
+    struct list_node *node = (struct list_node*)malloc(sizeof(struct list_node));
+    strncpy(node->name, word, WORD_MAX_LEN);
+    list_append(list, node);
+}
+/*
+void getFromLinkedList(){
+ 
+}
+*/
 int main(int argc, char *argv[]) {
     if (argc != 2) {
         perror("Invalid argument");
