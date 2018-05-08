@@ -7,6 +7,7 @@
 #include "uthash/src/uthash.h"
 
 #define WORD_MAX_LEN 100
+//#define DEBUG
 
 struct hashtable {
     char name[WORD_MAX_LEN];
@@ -67,10 +68,12 @@ void list_append(struct linked_list *list, struct list_node *node) {
     }
 }
 
-pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
+pthread_mutex_t ll_lock = PTHREAD_MUTEX_INITIALIZER;
+pthread_mutex_t ht_lock = PTHREAD_MUTEX_INITIALIZER;
+pthread_mutex_t eof_lock = PTHREAD_MUTEX_INITIALIZER;
 struct linked_list list;
 struct hashtable *table = NULL;
-struct timeval tv1, tv2;
+int eof_flag = 0;
 
 // assume that input is valid
 // assume no specific order is required for the result
@@ -95,6 +98,8 @@ void readData(char* path, int thread_num) {
         exit(EXIT_FAILURE);
     }
     
+    struct hashtable total[thread_num - 1];
+    
     struct hashtable *s, *tmp;
     struct arg_read *arg1 = (struct arg_read*)malloc(sizeof(struct arg_read));
     arg1->input = input;
@@ -114,7 +119,6 @@ void readData(char* path, int thread_num) {
             fprintf(stderr, "error: Cannot create write thread # %d\n", i);
             break;
         }
-        i++;
     }
     
     /* wait for all child threads to be done */
@@ -122,7 +126,10 @@ void readData(char* path, int thread_num) {
     for (; i < thread_num - 1; i++) {
         pthread_join(write_thread[i], NULL);
     }
-    
+
+#ifdef DEBUG
+    printf("Start iterating over hashtable\n");
+#endif
     /* iterate over the hash table to write to file2 */
     HASH_ITER(hh, table, s, tmp) {
         fprintf(file2, "%s %d\n", s->name, s->count);
@@ -131,11 +138,11 @@ void readData(char* path, int thread_num) {
     free(s);
     fclose(file2);
     
-    pthread_mutex_destroy(&lock);
+    pthread_mutex_destroy(&ll_lock);
+    pthread_mutex_destroy(&ht_lock);
 }
 
 void *writeToLinkedList(struct arg_read* arg1) {
-    pthread_mutex_lock(&lock);
     
     int line_num = 1;
     int word_count = 1;
@@ -161,7 +168,10 @@ void *writeToLinkedList(struct arg_read* arg1) {
             
             struct list_node *node = (struct list_node*)malloc(sizeof(struct list_node));
             strncpy(node->name, word, WORD_MAX_LEN);
+            
+            pthread_mutex_lock(&ll_lock);
             list_append(&list, node);
+            pthread_mutex_unlock(&ll_lock);
             
             word_count++;
             word[0] = 0;
@@ -183,27 +193,50 @@ void *writeToLinkedList(struct arg_read* arg1) {
     
     struct list_node *node = (struct list_node*)malloc(sizeof(struct list_node));
     strncpy(node->name, word, WORD_MAX_LEN);
+    
+    pthread_mutex_lock(&ll_lock);
     list_append(&list, node);
+    pthread_mutex_unlock(&ll_lock);
+    
+    pthread_mutex_lock(&eof_lock);
+    eof_flag = 1;
+    pthread_mutex_unlock(&eof_lock);
     
     fclose(arg1->input);
     fclose(arg1->file1);
-    pthread_mutex_unlock(&lock);
     
     return 0;
 }
 
 void *writeToHashTable(struct arg_write *arg2) {
-    printf("Thread: %d\n", arg2->thread_idx);
-    
-    while (!list_empty(&list)) {
+#ifdef DEBUG
+    printf("Thread enters: %d\n", arg2->thread_idx);
+#endif
+    while (1) {
+        
+        pthread_mutex_lock(&eof_lock);
+        pthread_mutex_lock(&ll_lock);
+        if (eof_flag == 1 && list_empty(&list)) {
+            pthread_mutex_unlock(&ll_lock);
+            pthread_mutex_unlock(&eof_lock);
+            break;
+        }
+        if (list_empty(&list)) {
+            pthread_mutex_unlock(&ll_lock);
+            pthread_mutex_unlock(&eof_lock);
+            usleep(5000);
+            continue;
+        }
         struct list_node *node = list_pop(&list);
+        pthread_mutex_unlock(&ll_lock);
+        pthread_mutex_unlock(&eof_lock);
+        
         char word[WORD_MAX_LEN];
         strncpy(word, node->name, WORD_MAX_LEN);
         /* HASH_FIND_STR find the char array, if not found, it will free s */
         
-        pthread_mutex_lock(&lock);
+        pthread_mutex_lock(&ht_lock);
         HASH_FIND_STR(table, word, arg2->s);
-        pthread_mutex_unlock(&lock);
         
         if (arg2->s) {
             arg2->s->count++;
@@ -212,12 +245,13 @@ void *writeToHashTable(struct arg_write *arg2) {
             arg2->s->count = 1;
             strncpy(arg2->s->name, word, WORD_MAX_LEN);
             
-            pthread_mutex_lock(&lock);
             HASH_ADD_STR(table, name, arg2->s);
-            pthread_mutex_unlock(&lock);
-        }    
+        }
+        pthread_mutex_unlock(&ht_lock);
     }
-    
+#ifdef DEBUG
+    printf("Thread exits: %d\n", arg2->thread_idx);
+#endif
     return 0;
 }
 
@@ -225,9 +259,11 @@ int main(int argc, char *argv[]) {
     if (argc != 2) {
         perror("Invalid argument");
     }
+    struct timeval tv1, tv2;
     
     long int core_num = sysconf(_SC_NPROCESSORS_ONLN);
-    
+    core_num = 8;
+
     printf("Online core number: %ld\n", core_num);
     
     gettimeofday(&tv1, NULL);
