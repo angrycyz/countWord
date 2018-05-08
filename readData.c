@@ -7,7 +7,6 @@
 #include "uthash/src/uthash.h"
 
 #define WORD_MAX_LEN 100
-#define lock_uthash
 
 struct hashtable {
     char name[WORD_MAX_LEN];
@@ -31,14 +30,15 @@ struct arg_read {
 };
 
 struct arg_write {
-
+    struct hashtable *s;
+    int thread_idx;
 };
 
 void *writeToLinkedList(struct arg_read* arg1);
 void list_append(struct linked_list *list, struct list_node *node);
 struct list_node* list_pop(struct linked_list *list);
 int list_empty(struct linked_list *list);
-void *writeToHashTable(struct hashtable *s);
+void *writeToHashTable(struct arg_write *arg2);
 
 int list_empty(struct linked_list *list) {
     return list->head == NULL;
@@ -107,7 +107,10 @@ void readData(char* path, int thread_num) {
     int i = 0;
     pthread_t write_thread[thread_num - 1];
     for (; i < thread_num - 1; i++) {
-        if (pthread_create(&write_thread[i], NULL, &writeToHashTable, s) != 0) {
+        struct arg_write *arg2 = (struct arg_write*)malloc(sizeof(struct arg_write));
+        arg2->s = s;
+        arg2->thread_idx = i;
+        if (pthread_create(&write_thread[i], NULL, &writeToHashTable, arg2) != 0) {
             fprintf(stderr, "error: Cannot create write thread # %d\n", i);
             break;
         }
@@ -189,27 +192,32 @@ void *writeToLinkedList(struct arg_read* arg1) {
     return 0;
 }
 
-void *writeToHashTable(struct hashtable *s) {
+void *writeToHashTable(struct arg_write *arg2) {
+    printf("Thread: %d\n", arg2->thread_idx);
     
-    pthread_mutex_lock(&lock);
     while (!list_empty(&list)) {
         struct list_node *node = list_pop(&list);
         char word[WORD_MAX_LEN];
         strncpy(word, node->name, WORD_MAX_LEN);
         /* HASH_FIND_STR find the char array, if not found, it will free s */
-        HASH_FIND_STR(table, word, s);
-
-        if (s) {
-            s->count++;
+        
+        pthread_mutex_lock(&lock);
+        HASH_FIND_STR(table, word, arg2->s);
+        pthread_mutex_unlock(&lock);
+        
+        if (arg2->s) {
+            arg2->s->count++;
         } else {
-            s = (struct hashtable*)malloc(sizeof(struct hashtable));
-            s->count = 1;
-            strncpy(s->name, word, WORD_MAX_LEN);
+            arg2->s = (struct hashtable*)malloc(sizeof(struct hashtable));
+            arg2->s->count = 1;
+            strncpy(arg2->s->name, word, WORD_MAX_LEN);
             
-            HASH_ADD_STR(table, name, s);
-        }
+            pthread_mutex_lock(&lock);
+            HASH_ADD_STR(table, name, arg2->s);
+            pthread_mutex_unlock(&lock);
+        }    
     }
-    pthread_mutex_unlock(&lock);
+    
     return 0;
 }
 
