@@ -9,8 +9,6 @@
 #define WORD_MAX_LEN 100
 #define lock_uthash
 
-struct timeval tv1, tv2;
-
 struct hashtable {
     char name[WORD_MAX_LEN];
     int count;
@@ -27,10 +25,20 @@ struct list_node {
     struct list_node *next;
 };
 
-void writeToLinkedList(char* word, struct linked_list* list);
+struct arg_read {
+    FILE* input;
+    FILE* file1;
+};
+
+struct arg_write {
+
+};
+
+void *writeToLinkedList(struct arg_read* arg1);
 void list_append(struct linked_list *list, struct list_node *node);
+struct list_node* list_pop(struct linked_list *list);
 int list_empty(struct linked_list *list);
-void writeToHashTable(char word[], struct hashtable *s, struct hashtable *table, struct linked_list* list, pthread_rwlock_t *lock);
+void *writeToHashTable(struct hashtable *s);
 
 int list_empty(struct linked_list *list) {
     return list->head == NULL;
@@ -59,18 +67,15 @@ void list_append(struct linked_list *list, struct list_node *node) {
     }
 }
 
+pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
+struct linked_list list;
+struct hashtable *table = NULL;
+struct timeval tv1, tv2;
+
 // assume that input is valid
 // assume no specific order is required for the result
 // assume unique word number will not exceed memory
-void readData(char* path) {
-
-#ifdef lock_uthash
-    pthread_rwlock_t lock;
-    if (pthread_rwlock_init(&lock,NULL) != 0) {
-        printf("can't create rwlock");
-        exit(EXIT_FAILURE);
-    }
-#endif
+void readData(char* path, int thread_num) {
     
     FILE *input = fopen(path, "r");
     if (input == NULL) {
@@ -83,14 +88,51 @@ void readData(char* path) {
         printf("Cannot open File1\n");
         exit(EXIT_FAILURE);
     }
+    
     FILE *file2 = fopen("File2.txt", "w");
     if (file2 == NULL) {
         printf("Cannot open File2\n");
         exit(EXIT_FAILURE);
     }
     
-    struct hashtable *s, *tmp, *table = NULL;
-    struct linked_list list;
+    struct hashtable *s, *tmp;
+    struct arg_read *arg1 = (struct arg_read*)malloc(sizeof(struct arg_read));
+    arg1->input = input;
+    arg1->file1 = file1;
+    
+    /* use master thread to read data to linked-list and save data to file1*/
+    writeToLinkedList(arg1);
+    
+    /* create threads which only retrieve data from linked-list and put data to hashtable*/
+    int i = 0;
+    pthread_t write_thread[thread_num - 1];
+    for (; i < thread_num - 1; i++) {
+        if (pthread_create(&write_thread[i], NULL, &writeToHashTable, s) != 0) {
+            fprintf(stderr, "error: Cannot create write thread # %d\n", i);
+            break;
+        }
+        i++;
+    }
+    
+    /* wait for all child threads to be done */
+    i = 0;
+    for (; i < thread_num - 1; i++) {
+        pthread_join(write_thread[i], NULL);
+    }
+    
+    /* iterate over the hash table to write to file2 */
+    HASH_ITER(hh, table, s, tmp) {
+        fprintf(file2, "%s %d\n", s->name, s->count);
+    }
+    
+    free(s);
+    fclose(file2);
+    
+    pthread_mutex_destroy(&lock);
+}
+
+void *writeToLinkedList(struct arg_read* arg1) {
+    pthread_mutex_lock(&lock);
     
     int line_num = 1;
     int word_count = 1;
@@ -98,13 +140,12 @@ void readData(char* path) {
     char word[WORD_MAX_LEN];
     int index = 0;
     
-    while ((character = fgetc(input)) != EOF) {
-        
+    while ((character = fgetc(arg1->input)) != EOF) {
         if (character == '\n' || character == ' ' || character == '\0' || character == '\t') {
-
+            
             /* write line number and word count to file1 */
             if (character == '\n') {
-                fprintf(file1, "%d %d\n", line_num, word_count);
+                fprintf(arg1->file1, "%d %d\n", line_num, word_count);
                 line_num++;
             }
             int i = 0;
@@ -114,10 +155,10 @@ void readData(char* path) {
                 word[i] = tolower(word[i]);
                 i++;
             }
-
-            writeToLinkedList(word, &list);
             
-            writeToHashTable(word, s, table, &list, &lock);
+            struct list_node *node = (struct list_node*)malloc(sizeof(struct list_node));
+            strncpy(node->name, word, WORD_MAX_LEN);
+            list_append(&list, node);
             
             word_count++;
             word[0] = 0;
@@ -127,53 +168,49 @@ void readData(char* path) {
             word[index] = 0;
         }
     }
-    
-    /* iterate over the hash table to write to file2 */
-    HASH_ITER(hh, table, s, tmp) {
-        fprintf(file2, "%s %d\n", s->name, s->count);
+
+    /* last line */
+    fprintf(arg1->file1, "%d %d\n", line_num, word_count);
+    int i = 0;
+    /* convert to lowercase */
+    while (i < WORD_MAX_LEN && word[i] != '\0') {
+        word[i] = tolower(word[i]);
+        i++;
     }
     
-    free(s);
-    fclose(input);
-    fclose(file1);
-    fclose(file2);
-
-#ifdef lock_uthash
-    pthread_rwlock_destroy(&lock);
-#endif
-}
-
-void writeToLinkedList(char word[], struct linked_list *list) {
     struct list_node *node = (struct list_node*)malloc(sizeof(struct list_node));
     strncpy(node->name, word, WORD_MAX_LEN);
-    list_append(list, node);
+    list_append(&list, node);
+    
+    fclose(arg1->input);
+    fclose(arg1->file1);
+    pthread_mutex_unlock(&lock);
+    
+    return 0;
 }
 
-void writeToHashTable(char word[], struct hashtable *s, struct hashtable *table, struct linked_list* list, pthread_rwlock_t *lock) {
-    /* HASH_FIND_STR find the char array, if not found, it will free the s */
-#ifdef lock_uthash
-    if (pthread_rwlock_rdlock(lock) != 0) {
-        printf("can't get rdlock");
-        exit(EXIT_FAILURE);
-    }
-    HASH_FIND_STR(table, word, s);
-    pthread_rwlock_unlock(lock);
-#endif
-    if (s) {
-        s->count++;
-    } else {
-        s = (struct hashtable*)malloc(sizeof(struct hashtable));
-        s->count = 1;
-        strncpy(s->name, word, WORD_MAX_LEN);
-#ifdef lock_uthash
-        if (pthread_rwlock_wrlock(lock) != 0) {
-            printf("can't get wrlock");
-            exit(EXIT_FAILURE);
+void *writeToHashTable(struct hashtable *s) {
+    
+    pthread_mutex_lock(&lock);
+    while (!list_empty(&list)) {
+        struct list_node *node = list_pop(&list);
+        char word[WORD_MAX_LEN];
+        strncpy(word, node->name, WORD_MAX_LEN);
+        /* HASH_FIND_STR find the char array, if not found, it will free s */
+        HASH_FIND_STR(table, word, s);
+
+        if (s) {
+            s->count++;
+        } else {
+            s = (struct hashtable*)malloc(sizeof(struct hashtable));
+            s->count = 1;
+            strncpy(s->name, word, WORD_MAX_LEN);
+            
+            HASH_ADD_STR(table, name, s);
         }
-        HASH_ADD_STR(table, name, s);
-        pthread_rwlock_unlock(lock);
-#endif
     }
+    pthread_mutex_unlock(&lock);
+    return 0;
 }
 
 int main(int argc, char *argv[]) {
@@ -186,11 +223,12 @@ int main(int argc, char *argv[]) {
     printf("Online core number: %ld\n", core_num);
     
     gettimeofday(&tv1, NULL);
-    readData(argv[1]);
+    
+    readData(argv[1], core_num);
+    
     gettimeofday(&tv2, NULL);
     printf ("Execution time = %f seconds\n",
             (double) (tv2.tv_usec - tv1.tv_usec) / 1000000 +
             (double) (tv2.tv_sec - tv1.tv_sec));
-    
     return 0;
 }
