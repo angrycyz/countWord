@@ -31,8 +31,8 @@ struct arg_read {
 };
 
 struct arg_write {
-    struct hashtable *s;
     int thread_idx;
+    struct hashtable *s;
 };
 
 void *writeToLinkedList(struct arg_read* arg1);
@@ -71,8 +71,8 @@ void list_append(struct linked_list *list, struct list_node *node) {
 pthread_mutex_t ll_lock = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t ht_lock = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t eof_lock = PTHREAD_MUTEX_INITIALIZER;
+struct hashtable *total[8];
 struct linked_list list;
-struct hashtable *table = NULL;
 int eof_flag = 0;
 
 // assume that input is valid
@@ -97,10 +97,7 @@ void readData(char* path, int thread_num) {
         printf("Cannot open File2\n");
         exit(EXIT_FAILURE);
     }
-    
-    struct hashtable total[thread_num - 1];
-    
-    struct hashtable *s, *tmp;
+    struct hashtable *s;
     struct arg_read *arg1 = (struct arg_read*)malloc(sizeof(struct arg_read));
     arg1->input = input;
     arg1->file1 = file1;
@@ -126,7 +123,26 @@ void readData(char* path, int thread_num) {
     for (; i < thread_num - 1; i++) {
         pthread_join(write_thread[i], NULL);
     }
-
+    
+    /* merge all table into one hashtable */
+    
+#ifdef DEBUG
+    printf("Start merging hashtable\n");
+#endif
+    struct hashtable *s_, *tmp, *table = NULL;
+    
+    i = 0;
+    for (; i < thread_num - 1; i++) {
+        HASH_ITER(hh, total[i], s_, tmp) {
+            HASH_FIND_STR(table, s_->name, s);
+            if (s) {
+                s->count += s_->count;
+            } else {
+                HASH_ADD_STR(table, name, s_);
+            }
+        }
+    }
+    
 #ifdef DEBUG
     printf("Start iterating over hashtable\n");
 #endif
@@ -152,7 +168,9 @@ void *writeToLinkedList(struct arg_read* arg1) {
     
     while ((character = fgetc(arg1->input)) != EOF) {
         if (character == '\n' || character == ' ' || character == '\0' || character == '\t') {
-            
+            if (index == 0) {
+                continue;
+            }
             /* write line number and word count to file1 */
             if (character == '\n') {
                 fprintf(arg1->file1, "%d %d\n", line_num, word_count);
@@ -212,8 +230,8 @@ void *writeToHashTable(struct arg_write *arg2) {
 #ifdef DEBUG
     printf("Thread enters: %d\n", arg2->thread_idx);
 #endif
+//    struct hashtable *s;
     while (1) {
-        
         pthread_mutex_lock(&eof_lock);
         pthread_mutex_lock(&ll_lock);
         if (eof_flag == 1 && list_empty(&list)) {
@@ -233,11 +251,9 @@ void *writeToHashTable(struct arg_write *arg2) {
         
         char word[WORD_MAX_LEN];
         strncpy(word, node->name, WORD_MAX_LEN);
+        
         /* HASH_FIND_STR find the char array, if not found, it will free s */
-        
-        pthread_mutex_lock(&ht_lock);
-        HASH_FIND_STR(table, word, arg2->s);
-        
+        HASH_FIND_STR(total[arg2->thread_idx], word, arg2->s);
         if (arg2->s) {
             arg2->s->count++;
         } else {
@@ -245,11 +261,14 @@ void *writeToHashTable(struct arg_write *arg2) {
             arg2->s->count = 1;
             strncpy(arg2->s->name, word, WORD_MAX_LEN);
             
-            HASH_ADD_STR(table, name, arg2->s);
+            HASH_ADD_STR(total[arg2->thread_idx], name, arg2->s);
         }
-        pthread_mutex_unlock(&ht_lock);
     }
 #ifdef DEBUG
+    struct hashtable *tmp;
+    HASH_ITER(hh, total[arg2->thread_idx], arg2->s, tmp) {
+        printf("thread: %d, iterate: %s\n, count: %d\n", arg2->thread_idx, arg2->s->name, arg2->s->count);
+    }
     printf("Thread exits: %d\n", arg2->thread_idx);
 #endif
     return 0;
