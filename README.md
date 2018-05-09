@@ -26,6 +26,20 @@ github: https://github.com/troydhanson/uthash
 
 I use the map reduce approach by using several hashtables and merge them to one hashtable after all child threads has finished adding word to hashtables. The master thread will only read from inputfile and write File1 and put the data into linked list, each node in linked list store one word. Other threads have their own hashtables and each time the thread will get one node from linked list and put them into the hashtable. After all threads has completed their own hashtable, we merge the hashtables into the final hashtable and generate File2. The share variable is a global linked list and eof flag indicating if master thread has already read all data from input file.
 
+
+------------------------------------------
+Time Complexity
+------------------------------------------
+By using hashtable, searching is O(1), assume we have n words, then put all words into the hashtable takes O(n) (if we ignoring the rehashing problem). The time complexity for readDataOnlyMaster is O(n).
+
+By using linked-list, pop and append is also O(1), the time complexity for readData is also O(n).
+
+Pros:
+Searching is O(1).
+
+Cons:
+For a large amount of words, if we keep putting the words into hashtable, the hashtable may be rehashed. rehash takes time since it will copy all the contents in the hashtable into a new assigned hashtable(for some implementation is array of linked list). And store the words may also exceed the memory if there are quite many diffrent words.
+
 ------------------------------------------
 Problem
 ------------------------------------------
