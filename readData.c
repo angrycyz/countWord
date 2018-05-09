@@ -7,7 +7,7 @@
 #include "uthash/src/uthash.h"
 
 #define WORD_MAX_LEN 100
-#define DEBUG
+//#define DEBUG
 
 struct hashtable {
     char name[WORD_MAX_LEN];
@@ -216,7 +216,6 @@ void *writeToHashTable(struct arg_write *arg2) {
 #ifdef DEBUG
     printf("Thread enters: %d\n", arg2->thread_idx);
 #endif
-//    struct hashtable *s;
     while (1) {
         pthread_mutex_lock(&eof_lock);
         pthread_mutex_lock(&ll_lock);
@@ -251,10 +250,6 @@ void *writeToHashTable(struct arg_write *arg2) {
         }
     }
 #ifdef DEBUG
-//    struct hashtable *tmp;
-//    HASH_ITER(hh, total[arg2->thread_idx], arg2->s, tmp) {
-//        printf("thread: %d, iterate: %s\n, count: %d\n", arg2->thread_idx, arg2->s->name, arg2->s->count);
-//    }
     printf("Thread exits: %d\n", arg2->thread_idx);
 #endif
     return 0;
@@ -267,7 +262,6 @@ int main(int argc, char *argv[]) {
     struct timeval tv1, tv2;
     
     long int core_num = sysconf(_SC_NPROCESSORS_ONLN);
-    core_num = 2;
 
     printf("Online core number: %ld\n", core_num);
     

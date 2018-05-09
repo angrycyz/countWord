@@ -8,69 +8,13 @@
 #include "uthash/src/uthash.h"
 
 #define WORD_MAX_LEN 100
-#define DEBUG
+//#define DEBUG
 
 struct hashtable {
     char name[WORD_MAX_LEN];
     int count;
     UT_hash_handle hh;
 };
-
-struct linked_list {
-    struct list_node *head;
-    struct list_node *tail;
-};
-
-struct list_node {
-    char name[WORD_MAX_LEN];
-    struct list_node *next;
-};
-
-struct arg_read {
-    FILE* input;
-    FILE* file1;
-};
-
-struct arg_write {
-    int thread_idx;
-    struct hashtable *s;
-};
-
-void *writeToLinkedList(struct arg_read* arg1);
-void list_append(struct linked_list *list, struct list_node *node);
-struct list_node* list_pop(struct linked_list *list);
-int list_empty(struct linked_list *list);
-void *writeToHashTable(struct arg_write *arg2);
-
-int list_empty(struct linked_list *list) {
-    return list->head == NULL;
-}
-
-struct list_node* list_pop(struct linked_list *list) {
-    if (list->head == NULL) {
-        return NULL;
-    } else {
-        struct list_node *node = list->head;
-        list->head = node->next;
-        if (list->head == NULL){
-            list->tail = NULL;
-        }
-        return node;
-    }
-}
-
-void list_append(struct linked_list *list, struct list_node *node) {
-    node->next = NULL;
-    if (list->head == NULL) {
-        list->head = list->tail = node;
-    } else {
-        list->tail->next = node;
-        list->tail = node;
-    }
-}
-
-struct linked_list list;
-int eof_flag = 0;
 
 // assume that input is valid
 // assume no specific order is required for the result
